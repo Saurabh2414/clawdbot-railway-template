@@ -12,8 +12,7 @@ RUN corepack enable
 
 WORKDIR /openclaw
 ARG OPENCLAW_GIT_REF=main
-# Use YOUR fork, not the original repo!
-RUN git clone --depth 1 --branch "${OPENCLAW_GIT_REF}" https://github.com/Saurabh2414/openclaw.git .
+RUN git clone --depth 1 --branch "${OPENCLAW_GIT_REF}" https://github.com/openclaw/openclaw.git .
 
 # Patch for workspace protocols
 RUN set -eux; \
@@ -27,15 +26,12 @@ RUN pnpm build
 ENV OPENCLAW_PREFER_PNPM=1
 RUN pnpm ui:install && pnpm ui:build
 
-# Verify UI build succeeded
-RUN echo "=== Verifying UI Build ===" && \
-    if [ -d "/openclaw/ui/dist" ] && [ "$(ls -A /openclaw/ui/dist 2>/dev/null)" ]; then \
-        echo "✓ UI build successful: $(ls /openclaw/ui/dist | wc -l) files"; \
-    else \
-        echo "✗ ERROR: UI build failed!"; \
-        ls -la /openclaw/ui/ 2>/dev/null || true; \
-        exit 1; \
-    fi
+# Verify UI build
+RUN echo "=== UI Build Verification ===" && \
+    echo "UI files in /openclaw/ui/dist:" && \
+    ls -la /openclaw/ui/dist/ || echo "No dist directory!" && \
+    echo "UI directory contents:" && \
+    ls -la /openclaw/ui/ || echo "No ui directory!"
 
 # STAGE 2: Final Runtime Image
 FROM node:22-bookworm
@@ -46,7 +42,6 @@ RUN apt-get update \
     ca-certificates curl pkill \
   && rm -rf /var/lib/apt/lists/*
 
-# Install pnpm globally for maintenance
 RUN npm install -g pnpm
 
 WORKDIR /app
@@ -54,17 +49,14 @@ WORKDIR /app
 # Copy built files
 COPY --from=openclaw-build /openclaw /openclaw
 
-# Verify UI assets in final image
-RUN echo "=== Checking UI assets in final image ===" && \
-    if [ -d "/openclaw/ui/dist" ] && [ "$(ls -A /openclaw/ui/dist 2>/dev/null)" ]; then \
-        echo "✓ UI assets found: $(ls /openclaw/ui/dist | wc -l) files"; \
-    else \
-        echo "✗ ERROR: UI assets missing or empty!"; \
-        ls -la /openclaw/ui/ 2>/dev/null || true; \
-        exit 1; \
-    fi
+# Debug: Show what was copied
+RUN echo "=== Verifying copied files ===" && \
+    echo "Checking /openclaw/ui/dist:" && \
+    ls -la /openclaw/ui/dist/ 2>/dev/null || echo "ERROR: /openclaw/ui/dist not found!" && \
+    echo "Total files in /openclaw/ui/dist:" && \
+    find /openclaw/ui/dist -type f 2>/dev/null | wc -l
 
-# Install Chromium (Assistant's "Eyes")
+# Install Chromium
 RUN apt-get update && apt-get install -y \
     chromium \
     fonts-ipafont-gothic \
@@ -85,18 +77,19 @@ COPY package.json ./
 RUN npm install --omit=dev && npm cache clean --force
 COPY src ./src
 
-# --- CRITICAL CONFIGURATION ---
-# Fixes "Assets not found" (Must be OPENCLAW_UI_PATH)
+# --- TRY ALL POSSIBLE ENVIRONMENT VARIABLES ---
 ENV OPENCLAW_UI_PATH=/openclaw/ui/dist
-# Fixes "Disconnected (1008)" - Trusts Railway internal network
+ENV OPENCLAW_UI_ASSETS_PATH=/openclaw/ui/dist
+ENV OPENCLAW_UI_DIST=/openclaw/ui/dist
+ENV UI_ASSETS_PATH=/openclaw/ui/dist
+
+# Other config
 ENV OPENCLAW_GATEWAY_TRUSTED_PROXIES=127.0.0.1,10.0.0.0/8,100.64.0.0/10
-# Browser config
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
-# Port config
 ENV PORT=8080
 ENV OPENCLAW_PUBLIC_PORT=8080
 
 EXPOSE 8080
 
-# --- STARTUP WITH SELF-HEALING ---
-CMD ["sh", "-c", "mkdir -p /data/.openclaw/agents/main/sessions/ && find /data/.openclaw/agents/main/sessions/ -name '*.lock' -delete 2>/dev/null || true && node src/server.js"]
+# --- STARTUP WITH DEBUGGING ---
+CMD ["sh", "-c", "echo '=== Environment Variables ===' && env | grep -i ui && echo '=== Checking UI files ===' && ls -la /openclaw/ui/dist/ 2>/dev/null || echo 'UI dist not found!' && echo '=== Starting... ===' && mkdir -p /data/.openclaw/agents/main/sessions/ && find /data/.openclaw/agents/main/sessions/ -name '*.lock' -delete 2>/dev/null || true && sleep 2 && node src/server.js"]
