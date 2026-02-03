@@ -64,6 +64,18 @@ COPY src ./src
 
 # The wrapper listens on this port.
 ENV OPENCLAW_PUBLIC_PORT=8080
+
+# Install Chromium and dependencies for browser automation
+RUN apt-get update && apt-get install -y \
+    chromium \
+    fonts-ipafont-gothic \
+    fonts-wqy-zenhei \
+    fonts-thai-tlwg \
+    fonts-kacst \
+    fonts-freefont-ttf \
+    libxss1 \
+    --no-install-recommends && \
+    rm -rf /var/lib/apt/lists/*
 ENV PORT=8080
 EXPOSE 8080
 CMD ["node", "src/server.js"]
